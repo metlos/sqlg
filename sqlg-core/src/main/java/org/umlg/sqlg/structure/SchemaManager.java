@@ -423,7 +423,7 @@ public class SchemaManager {
         return sqlDialect;
     }
 
-    void ensureVertexTableExist(final String schema, final String table, final Object... keyValues) {
+    public void ensureVertexTableExist(final String schema, final String table, final Object... keyValues) {
         Objects.requireNonNull(schema, GIVEN_TABLES_MUST_NOT_BE_NULL);
         Objects.requireNonNull(table, GIVEN_TABLE_MUST_NOT_BE_NULL);
         final String prefixedTable = VERTEX_PREFIX + table;
