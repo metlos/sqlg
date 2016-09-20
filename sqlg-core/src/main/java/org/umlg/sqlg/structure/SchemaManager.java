@@ -187,12 +187,14 @@ public class SchemaManager {
     private static final String TABLE_LABELS_HAZELCAST_MAP = "_tableLabels";
     private static final String PROPERTY_UNIQUE_CONSTRAINT_HAZELCAST_MAP = "propertyUniqueConstraints";
 
-    private static final int LOCK_TIMEOUT = 10;
+    private final int schemaLockTimeout;
 
     SchemaManager(SqlgGraph sqlgGraph, SqlDialect sqlDialect, Configuration configuration) {
         this.sqlgGraph = sqlgGraph;
         this.sqlDialect = sqlDialect;
         this.distributed = configuration.getBoolean("distributed", false);
+        //5 minutes, for a transaction to commit
+        this.schemaLockTimeout = configuration.getInt("schemaLockTimeout", 300);
 
         if (this.distributed) {
             this.hazelcastInstance = Hazelcast.newHazelcastInstance(configHazelcast(configuration));
@@ -650,7 +652,7 @@ public class SchemaManager {
     private void lock(String schema, String table) {
         if (!this.isLockedByCurrentThread()) {
             try {
-                if (!this.schemaLock.tryLock(LOCK_TIMEOUT, TimeUnit.SECONDS)) {
+                if (!this.schemaLock.tryLock(schemaLockTimeout, TimeUnit.SECONDS)) {
                     throw new RuntimeException("timeout lapsed for to acquire lock for schema creation for " + schema + "." + table);
                 }
             } catch (InterruptedException e) {
