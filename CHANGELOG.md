@@ -1,9 +1,19 @@
+##1.3.2
+
+* Fix bug [#73](https://github.com/pietermartin/sqlg/issues/73)
+        Thanks to [JPMoresmau](https://github.com/JPMoresmau)
+
+##1.3.1
+
+* 1.3.0 uploaded strange byte code, this fixes that.
+
 ##1.3.0
 
 * Upgrade to TinkerPop 3.2.2
 * Added H2 support.
 * Added support for getting the data source from JNDI.
 * Optimize `SqlgGraph.bulkAddEdges(...) to use the correct types for the in and out properties. This has a marginal performance increase.
+* Refactored pom to separate out `gremlin-groovy` to be an optional dependency.
 
 ##1.2.0
 
