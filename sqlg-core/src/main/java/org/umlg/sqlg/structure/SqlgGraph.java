@@ -242,11 +242,13 @@ public class SqlgGraph implements Graph {
                 this.sqlgDataSource = SqlgDataSource
                         .setupDataSourceFromJndi(jdbcUrl.substring(SqlgDataSource.JNDI_PREFIX.length()),
                                 this.configuration);
-                SqlgPlugin p = findSqlgPlugin(this.sqlgDataSource.get(jdbcUrl).getConnection().getMetaData());
-                if (p == null) {
-                    throw new IllegalStateException("Could not find suitable sqlg plugin for the JDBC URL: " + jdbcUrl);
-                }
-                this.sqlDialect = p.instantiateDialect();
+                try (Connection conn = this.sqlgDataSource.get(jdbcUrl).getConnection()) {
+                    SqlgPlugin p = findSqlgPlugin(conn.getMetaData());
+                    if (p == null) {
+                        throw new IllegalStateException("Could not find suitable sqlg plugin for the JDBC URL: " + jdbcUrl);
+                    }
+                    this.sqlDialect = p.instantiateDialect();
+                };
             } else {
                 SqlgPlugin p = findSqlgPlugin(jdbcUrl);
                 if (p == null) {
@@ -259,7 +261,9 @@ public class SqlgGraph implements Graph {
             }
 
             logger.info(String.format("Opening graph. Connection url = %s, maxPoolSize = %d", this.configuration.getString(JDBC_URL), configuration.getInt("maxPoolSize", 100)));
-            this.sqlDialect.prepareDB(this.sqlgDataSource.get(configuration.getString(JDBC_URL)).getConnection());
+            try (Connection conn = this.sqlgDataSource.get(configuration.getString(JDBC_URL)).getConnection()) {
+                this.sqlDialect.prepareDB(conn);
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -1070,7 +1074,7 @@ public class SqlgGraph implements Graph {
                     int type = rsmd.getColumnType(i);
                     //make sure to obtain array using getArray()
                     //At least in H2, this makes a difference...
-                    Object o = type == Types.ARRAY ? rs.getArray(columnName) : rs.getObject(columnName);
+                    Object o = type == Types.ARRAY ? rs.getArray(i) : rs.getObject(i);
                     this.sqlDialect.putJsonObject(obj, columnName, type, o);
                     if (first) {
                         this.sqlDialect.putJsonMetaObject(this.mapper, metaNode, columnName, type, o);

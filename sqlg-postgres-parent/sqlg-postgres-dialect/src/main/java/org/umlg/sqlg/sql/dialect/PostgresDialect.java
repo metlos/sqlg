@@ -49,6 +49,8 @@ public class PostgresDialect extends BaseSqlDialect {
     private static final String COPY_COMMAND_DELIMITER = "\t";
     //this strange character is apparently an illegal json char so its good as a quote
     private static final String COPY_COMMAND_QUOTE = "e'\\x01'";
+    private static final char QUOTE = 0x01;
+    private static final char ESCAPE = '\\';
     private static final int PARAMETER_LIMIT = 32767;
     private static final String COPY_DUMMY = "_copy_dummy";
     private Logger logger = LoggerFactory.getLogger(SqlgGraph.class.getName());
@@ -101,7 +103,7 @@ public class PostgresDialect extends BaseSqlDialect {
 
     @Override
     public String getAutoIncrementPrimaryKeyConstruct() {
-        return "SERIAL PRIMARY KEY";
+        return "BIGSERIAL PRIMARY KEY";
     }
 
     public void assertTableName(String tableName) {
@@ -226,7 +228,9 @@ public class PostgresDialect extends BaseSqlDialect {
                     sql.append("' ");
                     sql.append("QUOTE ");
                     sql.append(COPY_COMMAND_QUOTE);
-                    sql.append(";");
+                    sql.append(" ESCAPE '");
+                    sql.append(ESCAPE);
+                    sql.append("';");
                     if (logger.isDebugEnabled()) {
                         logger.debug(sql.toString());
                     }
@@ -295,7 +299,9 @@ public class PostgresDialect extends BaseSqlDialect {
                     sql.append("' ");
                     sql.append("QUOTE ");
                     sql.append(COPY_COMMAND_QUOTE);
-                    sql.append(";");
+                    sql.append(" ESCAPE '");
+                    sql.append(ESCAPE);
+                    sql.append("';");
                     if (logger.isDebugEnabled()) {
                         logger.debug(sql.toString());
                     }
@@ -473,7 +479,7 @@ public class PostgresDialect extends BaseSqlDialect {
                             break;
                         case LOCALTIME:
                             sql.append("'");
-                            sql.append(value.toString());
+                            sql.append(shiftDST((LocalTime)value).toString());
                             sql.append("'::TIME");
                             break;
                         case ZONEDDATETIME:
@@ -769,7 +775,9 @@ public class PostgresDialect extends BaseSqlDialect {
         sql.append("' ");
         sql.append("QUOTE ");
         sql.append(COPY_COMMAND_QUOTE);
-        sql.append(";");
+        sql.append(" ESCAPE '");
+        sql.append(ESCAPE);
+        sql.append("';");
         if (logger.isDebugEnabled()) {
             logger.debug(sql.toString());
         }
@@ -875,7 +883,9 @@ public class PostgresDialect extends BaseSqlDialect {
         sql.append("' ");
         sql.append("QUOTE ");
         sql.append(COPY_COMMAND_QUOTE);
-        sql.append(";");
+        sql.append(" ESCAPE '");
+        sql.append(ESCAPE);
+        sql.append("';");
         if (logger.isDebugEnabled()) {
             logger.debug(sql.toString());
         }
@@ -951,6 +961,10 @@ public class PostgresDialect extends BaseSqlDialect {
                 case DURATION:
                     Duration duration = (Duration) value;
                     result = duration.getSeconds() + COPY_COMMAND_DELIMITER + duration.getNano();
+                    break;
+                case LOCALTIME:
+                	LocalTime lt = (LocalTime) value;
+                	result = shiftDST(lt).toString();
                     break;
                 case ZONEDDATETIME_ARRAY:
                     ZonedDateTime[] zonedDateTimes = (ZonedDateTime[]) value;
@@ -1032,6 +1046,21 @@ public class PostgresDialect extends BaseSqlDialect {
                     for (int i = 0; i < length; i++) {
                         period = periods[i];
                         sb.append(period.getDays());
+                        if (i < length - 1) {
+                            sb.append(",");
+                        }
+                    }
+                    sb.append("}");
+                    return sb.toString();
+                case LOCALTIME_ARRAY:
+                    LocalTime[] localTimes = (LocalTime[]) value;
+                    sb = new StringBuilder();
+                    sb.append("{");
+                    length = java.lang.reflect.Array.getLength(value);
+                    for (int i = 0; i < length; i++) {
+                        LocalTime localTime = localTimes[i];
+                        result = shiftDST(localTime).toString();
+                        sb.append(result);
                         if (i < length - 1) {
                             sb.append(",");
                         }
@@ -1482,13 +1511,32 @@ public class PostgresDialect extends BaseSqlDialect {
         return new ByteArrayInputStream(sb.toString().getBytes());
     }
 
-    //In particular, the following characters must be preceded by a backslash if they appear as part of a column value:
-    //backslash itself, newline, carriage return, and the current delimiter character.
+    /**
+     * this follows the PostgreSQL rules at https://www.postgresql.org/docs/current/static/sql-copy.html#AEN77663
+     * "If the value contains the delimiter character, the QUOTE character, the NULL string, a carriage return, 
+     * or line feed character, then the whole value is prefixed and suffixed by the QUOTE character, 
+     * and any occurrence within the value of a QUOTE character or the ESCAPE character is preceded 
+     * by the escape character."
+     * @param s
+     * @return
+     */
     private String escapeSpecialCharacters(String s) {
-        s = s.replace("\\", "\\\\");
-        s = s.replace("\n", "\\\\n");
-        s = s.replace("\r", "\\\\r");
-        s = s.replace("\t", "\\\\t");
+    	StringBuilder sb=new StringBuilder();
+    	boolean needEscape=false;
+    	for (int a=0;a<s.length();a++){
+    		char c=s.charAt(a);
+    		if (c=='\n' || c=='\r' || c==0 || c==COPY_COMMAND_DELIMITER.charAt(0)){
+    			needEscape=true;
+    		}
+    		if (c==ESCAPE || c==QUOTE){
+    			needEscape=true;
+    			sb.append(ESCAPE);
+    		}
+    		sb.append(c);
+    	}
+    	if (needEscape){
+    		return QUOTE+sb.toString()+QUOTE;
+    	}
         return s;
     }
 
@@ -2522,5 +2570,20 @@ public class PostgresDialect extends BaseSqlDialect {
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
+    }
+    
+    /**
+     * Postgres gets confused by DST, it sets the timezone badly and then reads the wrong value out, so we convert the value to "winter time"
+     * @param lt the current time
+     * @return the time in "winter time" if there is DST in effect today
+     */
+    @SuppressWarnings("deprecation")
+	private static Time shiftDST(LocalTime lt){
+        Time t=Time.valueOf(lt);
+        int offset=Calendar.getInstance().get(Calendar.DST_OFFSET)/1000;
+        // I know this are deprecated methods, but it's so much clearer than alternatives
+    	int m=t.getSeconds();
+    	t.setSeconds(m+offset);
+    	return t;
     }
 }
